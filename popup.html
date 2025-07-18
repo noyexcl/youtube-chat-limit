@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {
+            width: 300px;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .header h3 {
+            color: #ff0000;
+            margin: 0;
+        }
+
+        .setting-group {
+            margin-bottom: 15px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        input[type="number"] {
+            width: 100%;
+            padding: 8px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+
+        input[type="number"]:focus {
+            border-color: #ff0000;
+            outline: none;
+        }
+
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .toggle {
+            position: relative;
+            width: 50px;
+            height: 24px;
+            background: #ccc;
+            border-radius: 24px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .toggle.active {
+            background: #ff0000;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s;
+        }
+
+        .toggle.active .toggle-slider {
+            transform: translateX(26px);
+        }
+
+        .save-btn {
+            width: 100%;
+            padding: 10px;
+            background: #ff0000;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .save-btn:hover {
+            background: #cc0000;
+        }
+
+        .status {
+            text-align: center;
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .current-count {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h3>YouTube Chat Limiter</h3>
+    </div>
+
+    <div class="setting-group">
+        <div class="toggle-container">
+            <label>機能を有効にする</label>
+            <div class="toggle" id="enableToggle">
+                <div class="toggle-slider"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="setting-group">
+        <label for="maxComments">最大コメント数</label>
+        <input type="number" id="maxComments" min="10" max="1000" value="100">
+        <div class="current-count">現在のコメント数: <span id="currentCount">-</span></div>
+    </div>
+
+    <div class="setting-group">
+        <label for="checkInterval">チェック間隔 (ミリ秒)</label>
+        <input type="number" id="checkInterval" min="500" max="5000" value="1000">
+    </div>
+
+    <button class="save-btn" id="saveBtn">設定を保存</button>
+
+    <div class="status" id="status" style="display: none;"></div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>
