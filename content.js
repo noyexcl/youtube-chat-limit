@@ -9,6 +9,8 @@ class YouTubeChatLimiter {
         this.chatContainer = null;
         this.chatDocument = null;
         this.alternativeCount = 0;
+        this.lastCleanupTime = 0;
+        this.mutationObserver = null;
         this.init();
     }
 
@@ -98,6 +100,7 @@ class YouTubeChatLimiter {
                         if (container) {
                             this.chatContainer = container;
                             this.chatDocument = chatDoc;
+                            this.setupChatMutationObserver();
                             this.startLimiting();
                             console.log('Chat container found:', selector);
                             return;
@@ -122,48 +125,84 @@ class YouTubeChatLimiter {
         }
     }
 
+    setupChatMutationObserver() {
+        if (!this.chatContainer || !this.chatDocument) return;
+
+        // 既存のオブザーバーを削除
+        if (this.mutationObserver) {
+            this.mutationObserver.disconnect();
+        }
+
+        // MutationObserverを設定してチャットの変更を監視
+        this.mutationObserver = new MutationObserver((mutations) => {
+            if (!this.enabled) return;
+
+            let hasNewMessages = false;
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    // 新しいメッセージが追加された
+                    hasNewMessages = true;
+                }
+            });
+
+            if (hasNewMessages) {
+                // 即座にチェックして制限を適用
+                this.limitChat();
+            }
+        });
+
+        // チャットコンテナの変更を監視
+        this.mutationObserver.observe(this.chatContainer, {
+            childList: true,
+            subtree: true
+        });
+
+        console.log('Chat mutation observer setup complete');
+    }
+
     setupAlternativeMethod() {
         // iframeにアクセスできない場合の代替方法
-        // より頻繁にDOMを監視してチャットの変化を検知
         let lastCount = 0;
+        let consecutiveFailures = 0;
 
         const checkChatUpdates = () => {
-            // 親ドキュメントからiframe内のチャット数を推定
             const chatFrame = document.querySelector('iframe[src*="live_chat"]');
             if (chatFrame) {
                 try {
                     const chatDoc = chatFrame.contentDocument || chatFrame.contentWindow.document;
                     if (chatDoc) {
-                        const selectors = [
-                            'yt-live-chat-text-message-renderer',
-                            'yt-live-chat-paid-message-renderer',
-                            'yt-live-chat-membership-item-renderer'
-                        ];
+                        const count = this.getChatItemsFromDocument(chatDoc);
 
-                        let totalCount = 0;
-                        selectors.forEach(selector => {
-                            const items = chatDoc.querySelectorAll(selector);
-                            totalCount += items.length;
-                        });
+                        if (count !== lastCount) {
+                            lastCount = count;
+                            this.alternativeCount = count;
+                            consecutiveFailures = 0;
 
-                        if (totalCount !== lastCount) {
-                            lastCount = totalCount;
-                            this.alternativeCount = totalCount;
-
-                            if (this.enabled && totalCount > this.maxComments) {
+                            if (this.enabled && count > this.maxComments) {
                                 this.limitChatFromParent();
                             }
                         }
+                    } else {
+                        consecutiveFailures++;
                     }
                 } catch (e) {
+                    consecutiveFailures++;
                     // アクセスできない場合はカウントを推定
                     this.alternativeCount = this.estimateChatCount();
                 }
+            } else {
+                consecutiveFailures++;
+            }
+
+            // 連続して失敗した場合は、より積極的にチェック
+            if (consecutiveFailures > 5) {
+                this.forceCleanupIfNeeded();
+                consecutiveFailures = 0;
             }
         };
 
         // 定期的にチェック
-        setInterval(checkChatUpdates, this.checkInterval);
+        setInterval(checkChatUpdates, Math.max(500, this.checkInterval / 2));
 
         // DOMの変更も監視
         const observer = new MutationObserver(() => {
@@ -176,6 +215,38 @@ class YouTubeChatLimiter {
             childList: true,
             subtree: true
         });
+    }
+
+    getChatItemsFromDocument(doc) {
+        const selectors = [
+            'yt-live-chat-text-message-renderer',
+            'yt-live-chat-paid-message-renderer',
+            'yt-live-chat-membership-item-renderer',
+            'yt-live-chat-paid-sticker-renderer',
+            'yt-live-chat-legacy-paid-message-renderer',
+            'yt-live-chat-viewer-engagement-message-renderer',
+            'yt-live-chat-mode-change-message-renderer',
+            'yt-live-chat-ticker-paid-message-item-renderer',
+            'yt-live-chat-ticker-sponsor-item-renderer'
+        ];
+
+        let totalCount = 0;
+        selectors.forEach(selector => {
+            const items = doc.querySelectorAll(selector);
+            totalCount += items.length;
+        });
+
+        return totalCount;
+    }
+
+    forceCleanupIfNeeded() {
+        // 強制的にクリーンアップを実行
+        const now = Date.now();
+        if (now - this.lastCleanupTime > 5000) { // 5秒に1回まで
+            this.lastCleanupTime = now;
+            this.limitChatFromParent();
+            console.log('Force cleanup executed');
+        }
     }
 
     estimateChatCount() {
@@ -195,6 +266,7 @@ class YouTubeChatLimiter {
         }
 
         if (this.enabled) {
+            // 通常のインターバル処理
             this.intervalId = setInterval(() => {
                 this.limitChat();
             }, this.checkInterval);
@@ -213,7 +285,12 @@ class YouTubeChatLimiter {
             // 古いアイテムから削除
             for (let i = 0; i < itemsToRemove; i++) {
                 if (chatItems[i] && chatItems[i].parentNode) {
-                    chatItems[i].remove();
+                    try {
+                        chatItems[i].remove();
+                    } catch (e) {
+                        // 削除に失敗した場合はスキップ
+                        console.warn('Failed to remove chat item:', e);
+                    }
                 }
             }
 
@@ -227,21 +304,66 @@ class YouTubeChatLimiter {
         if (chatFrame) {
             try {
                 const chatDoc = chatFrame.contentDocument || chatFrame.contentWindow.document;
-                const chatItems = chatDoc.querySelectorAll('yt-live-chat-text-message-renderer, yt-live-chat-paid-message-renderer, yt-live-chat-membership-item-renderer');
+                if (chatDoc) {
+                    const chatItems = this.getChatItemsArrayFromDocument(chatDoc);
 
-                if (chatItems.length > this.maxComments) {
-                    const itemsToRemove = chatItems.length - this.maxComments;
+                    if (chatItems.length > this.maxComments) {
+                        const itemsToRemove = chatItems.length - this.maxComments;
 
-                    for (let i = 0; i < itemsToRemove; i++) {
-                        if (chatItems[i] && chatItems[i].parentNode) {
-                            chatItems[i].remove();
+                        for (let i = 0; i < itemsToRemove; i++) {
+                            if (chatItems[i] && chatItems[i].parentNode) {
+                                try {
+                                    chatItems[i].remove();
+                                } catch (e) {
+                                    console.warn('Failed to remove chat item from parent:', e);
+                                }
+                            }
                         }
+
+                        console.log(`Removed ${itemsToRemove} old chat messages from parent`);
                     }
                 }
             } catch (e) {
                 // アクセスできない場合はスキップ
+                console.warn('Cannot access chat iframe for cleanup:', e);
             }
         }
+    }
+
+    getChatItemsArrayFromDocument(doc) {
+        const selectors = [
+            'yt-live-chat-text-message-renderer',
+            'yt-live-chat-paid-message-renderer',
+            'yt-live-chat-membership-item-renderer',
+            'yt-live-chat-paid-sticker-renderer',
+            'yt-live-chat-legacy-paid-message-renderer',
+            'yt-live-chat-viewer-engagement-message-renderer',
+            'yt-live-chat-mode-change-message-renderer',
+            'yt-live-chat-ticker-paid-message-item-renderer',
+            'yt-live-chat-ticker-sponsor-item-renderer'
+        ];
+
+        let allItems = [];
+        selectors.forEach(selector => {
+            const items = doc.querySelectorAll(selector);
+            allItems = allItems.concat(Array.from(items));
+        });
+
+        // 重複を除去し、DOM上の順序でソート
+        const uniqueItems = [...new Set(allItems)];
+
+        // DOM順序でソート（古いものから順に）
+        uniqueItems.sort((a, b) => {
+            const position = a.compareDocumentPosition(b);
+            if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
+                return -1;
+            } else if (position & Node.DOCUMENT_POSITION_PRECEDING) {
+                return 1;
+            }
+            return 0;
+        });
+
+        return uniqueItems;
     }
 
     getChatItems() {
@@ -258,6 +380,8 @@ class YouTubeChatLimiter {
             'yt-live-chat-legacy-paid-message-renderer',
             'yt-live-chat-viewer-engagement-message-renderer',
             'yt-live-chat-mode-change-message-renderer',
+            'yt-live-chat-ticker-paid-message-item-renderer',
+            'yt-live-chat-ticker-sponsor-item-renderer',
             '.chat-line__message',
             '.message'
         ];
@@ -271,15 +395,42 @@ class YouTubeChatLimiter {
             }
         }
 
-        // 重複を除去（同じ要素が複数のセレクターにマッチする場合）
+        // 重複を除去し、DOM上の順序でソート
         const uniqueItems = [...new Set(allItems)];
+
+        // DOM順序でソート（古いものから順に）
+        uniqueItems.sort((a, b) => {
+            const position = a.compareDocumentPosition(b);
+            if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
+                return -1;
+            } else if (position & Node.DOCUMENT_POSITION_PRECEDING) {
+                return 1;
+            }
+            return 0;
+        });
 
         console.log(`Found ${uniqueItems.length} chat items`);
         return uniqueItems;
     }
 
     getCurrentCount() {
-        const count = this.getChatItems().length;
+        let count = 0;
+
+        // 直接取得を試行
+        if (this.chatContainer) {
+            count = this.getChatItems().length;
+        }
+
+        // 代替方法を使用している場合
+        if (count === 0 && this.alternativeCount !== undefined) {
+            count = this.alternativeCount;
+        }
+
+        // さらに詳細な検索を試行
+        if (count === 0) {
+            count = this.getDetailedChatCount();
+        }
+
         console.log(`Current chat count: ${count}`);
         return count;
     }
@@ -301,18 +452,7 @@ class YouTubeChatLimiter {
                 this.updateSettings(request.settings);
                 sendResponse({ success: true });
             } else if (request.action === 'getCurrentCount') {
-                let count = this.getCurrentCount();
-
-                // 代替方法を使用している場合
-                if (count === 0 && this.alternativeCount !== undefined) {
-                    count = this.alternativeCount;
-                }
-
-                // さらに詳細な検索を試行
-                if (count === 0) {
-                    count = this.getDetailedChatCount();
-                }
-
+                const count = this.getCurrentCount();
                 sendResponse({ count: count });
             }
             return true; // 非同期レスポンスのため
@@ -326,25 +466,7 @@ class YouTubeChatLimiter {
             try {
                 const chatDoc = chatFrame.contentDocument || chatFrame.contentWindow.document;
                 if (chatDoc) {
-                    // 全ての可能なセレクターを試す
-                    const allSelectors = [
-                        'yt-live-chat-text-message-renderer',
-                        'yt-live-chat-paid-message-renderer',
-                        'yt-live-chat-membership-item-renderer',
-                        'yt-live-chat-paid-sticker-renderer',
-                        'yt-live-chat-legacy-paid-message-renderer',
-                        'yt-live-chat-viewer-engagement-message-renderer',
-                        '[class*="message"]',
-                        '[id*="message"]'
-                    ];
-
-                    let maxCount = 0;
-                    allSelectors.forEach(selector => {
-                        const items = chatDoc.querySelectorAll(selector);
-                        maxCount = Math.max(maxCount, items.length);
-                    });
-
-                    return maxCount;
+                    return this.getChatItemsFromDocument(chatDoc);
                 }
             } catch (e) {
                 console.log('Cannot access chat iframe for detailed count');
