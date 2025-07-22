@@ -4,7 +4,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const checkIntervalInput = document.getElementById('checkInterval');
     const saveBtn = document.getElementById('saveBtn');
     const status = document.getElementById('status');
-    const currentCount = document.getElementById('currentCount');
 
     // 設定を読み込み
     chrome.storage.sync.get({
@@ -15,17 +14,6 @@ document.addEventListener('DOMContentLoaded', function () {
         enableToggle.classList.toggle('active', items.enabled);
         maxCommentsInput.value = items.maxComments;
         checkIntervalInput.value = items.checkInterval;
-    });
-
-    // 現在のコメント数を取得
-    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-        if (tabs[0].url.includes('youtube.com/watch')) {
-            chrome.tabs.sendMessage(tabs[0].id, { action: 'getCurrentCount' }, function (response) {
-                if (response && response.count !== undefined) {
-                    currentCount.textContent = response.count;
-                }
-            });
-        }
     });
 
     // トグルボタンの処理

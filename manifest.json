@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
     "name": "YouTube Live Chat Limiter",
-    "version": "1.0",
-    "description": "YouTubeライブチャットのコメント数を制限し、古いコメントを自動削除します",
+    "version": "0.1.0",
+    "description": "Limit the number of comments in YouTube live chat and automatically delete old comments",
     "permissions": [
         "activeTab",
         "storage"
@@ -10,16 +10,17 @@
     "content_scripts": [
         {
             "matches": [
-                "https://www.youtube.com/watch*"
+                "https://www.youtube.com/*"
             ],
             "js": [
                 "content.js"
             ],
-            "run_at": "document_end"
+            "run_at": "document_end",
+            "all_frames": true
         }
     ],
     "action": {
         "default_popup": "popup.html",
-        "default_title": "YouTube Chat Limiter"
+        "default_title": "YouTube Live Chat Limiter"
     }
 }
